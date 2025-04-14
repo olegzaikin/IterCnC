@@ -36,7 +36,7 @@
 
 using namespace std;
 
-string version = "0.0.1";
+string version = "0.0.2";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -94,19 +94,18 @@ struct cnf {
 };
 
 unsigned get_cutoff(const string la_solver_name,
-	                const string cnf_name,
-					const long long int var_num,
+	                const cnf cur_cnf,
+					const unsigned prev_threshold,
 	                const unsigned nthreads);
-unsigned get_free_vars(const string la_solver_name, const string cnf_name,
-	                   const long long int var_num);
+unsigned get_free_vars(const string la_solver_name, const cnf cur_cnf);
 string exec(const string cmd_str);
 vector<workunit> read_cubes(const string cubes_name);
 result solve_cube(const cnf c, const string solver_name,
 	              const time_point_t program_start, workunit &wu,
 				  const unsigned cube_time_lim);
 result read_solver_result(const string fname);
-void print_stats(const unsigned sat_cubes, const unsigned unsat_cubes,
-	const unsigned interr_cubes);
+void print_stats(const workunit wu, const unsigned sat_cubes,
+	             const unsigned unsat_cubes, const unsigned interr_cubes);
 void kill_solver(const string solver_name);
 void print_elapsed_time(const time_point_t program_start);
 cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
@@ -165,17 +164,18 @@ int main(int argc, char *argv[]) {
 
     // Run CnC interatively:
 	unsigned iter_num = 0;
+	unsigned threshold = 0;
 	for (;;) {
 		cout << "*** iteration " << iter_num << endl;
 		// Find a proper cutoff threshold for cubing:
-		unsigned threshold = get_cutoff(la_solver_name, cur_cnf.name, cur_cnf.var_num, nthreads);
-		cout << "threshold : " << threshold << " gives at most " << nthreads << " cubes" << endl;
+		threshold = get_cutoff(la_solver_name, cur_cnf, threshold, nthreads);
 		// Produce cubes:
 		string cubes_name = "cubes";
 		string system_str = la_solver_name + " " + cur_cnf.name + " -n " + to_string(threshold) + " -o " + cubes_name;
 		exec(system_str);
 		vector<workunit> wu_vec = read_cubes(cubes_name);
-		cout << wu_vec.size() << " cubes were read" << endl;
+		cout << "threshold : " << threshold << " gives " << wu_vec.size() << " cubes" << endl;
+		//cout << wu_vec.size() << " cubes were read" << endl;
 		cout << "first cubes : " << endl;
 		unsigned maxprint = wu_vec.size() >= 3 ? 3 : wu_vec.size(); 
 		for (unsigned i = 0; i < maxprint; i++) wu_vec[i].print();
@@ -198,19 +198,19 @@ int main(int argc, char *argv[]) {
 			if (res == SAT) {
 				sat_cubes++;
 				cout << "SAT is found." << endl;
-				print_stats(sat_cubes, unsat_cubes, interr_cubes);
+				print_stats(wu, sat_cubes, unsat_cubes, interr_cubes);
 				// Kill the solver once if the SAT finding mode:
 				cout << "Killing CDCL solver " << cdcl_solver_name << endl;
 				kill_solver(cdcl_solver_name);
 			}
 			else if (res == UNSAT) {
 				unsat_cubes++;
-				print_stats(sat_cubes, unsat_cubes, interr_cubes);
+				print_stats(wu, sat_cubes, unsat_cubes, interr_cubes);
 			}
 			else {
 				interr_cubes++;
 				assert(res == INTERR);
-				print_stats(sat_cubes, unsat_cubes, interr_cubes);
+				print_stats(wu, sat_cubes, unsat_cubes, interr_cubes);
 			}
 			// If all but one solved and UNSAT, interrupt the remaining one:
 			if (unsat_cubes == wus_num-1 and sat_cubes == 0 and interr_cubes == 0) {
@@ -255,7 +255,6 @@ int main(int argc, char *argv[]) {
 			// Make a new cnf where unsat-cubes are added as clauses:
 			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, wu_vec, iter_num);
 			cout << "new iteration on CNF " << new_cnf.name << endl;
-			new_cnf.print();
 			cur_cnf = new_cnf;
 		}
 		// If all but one cube-problem are UNSAT and the remaining one is not
@@ -269,7 +268,6 @@ int main(int argc, char *argv[]) {
 			// while the remaining cube is added as unit clauses:
 			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, wu_vec, iter_num, true);
 			cout << "new iteration on CNF " << new_cnf.name << endl;
-			new_cnf.print();
 			cur_cnf = new_cnf;
 		}
 		iter_num++;
@@ -284,10 +282,17 @@ int main(int argc, char *argv[]) {
 
 // For a given number of threads n, find a cutoff threshold that gives at most
 // n cubes:
-unsigned get_cutoff(const string la_solver_name, const string cnf_name,
-	                const long long int var_num, const unsigned nthreads) {
-	unsigned cur_threshold = get_free_vars(la_solver_name, cnf_name, var_num);
+unsigned get_cutoff(const string la_solver_name, const cnf cur_cnf,
+	                const unsigned prev_threshold, const unsigned nthreads) {
+	assert(cur_cnf.name != "");
+	assert(cur_cnf.var_num > 0);
+	const string cnf_name = cur_cnf.name;
+	unsigned cur_threshold = prev_threshold;
+	if (cur_threshold == 0) {
+		cur_threshold = get_free_vars(la_solver_name, cur_cnf);
+	}
 	assert(cur_threshold > 0);
+	cout << "Start searching for threshold from " << cur_threshold << endl;
 
 	for (;;) {
 		string system_str = la_solver_name + " " + cnf_name + " -n " + to_string(cur_threshold);
@@ -318,10 +323,11 @@ unsigned get_cutoff(const string la_solver_name, const string cnf_name,
 }
 
 // Run lookahead solver and parse the number of free variables from its output:
-unsigned get_free_vars(const string la_solver_name, const string cnf_name,
-	                   const long long int var_num) {
-	assert(var_num > 0);
-	string system_str = la_solver_name + " " + cnf_name + " -n " + to_string(var_num);
+unsigned get_free_vars(const string la_solver_name, const cnf cur_cnf) {
+	assert(cur_cnf.name != "");
+	assert(cur_cnf.var_num > 0);
+	string system_str = la_solver_name + " " + cur_cnf.name + " -n " +
+	                    to_string(cur_cnf.var_num);
 	string res_str = exec(system_str);
 	stringstream res_sstream(res_str);
 	string str;
@@ -407,7 +413,7 @@ result solve_cube(const cnf c, const string solver_name,
 	string system_str = "timelimit -t " + to_string(cube_time_lim) +
 	                         " -T 1 " + solver_name;
 	system_str += " " + local_cnf_file_name;
-	cout << system_str << endl;
+	//cout << system_str << endl;
 	string local_out_file_name = "id-" + wu_id_str + "-out";
 	fstream local_out_file;
 	local_out_file.open(local_out_file_name, ios_base::out);
@@ -474,10 +480,11 @@ result read_solver_result(const string fname) {
 	return res;
 }
 
-void print_stats(const unsigned sat_cubes, const unsigned unsat_cubes,
-	             const unsigned interr_cubes)
+void print_stats(const workunit wu, const unsigned sat_cubes,
+	             const unsigned unsat_cubes, const unsigned interr_cubes)
 {
-	cout << "sat-cubes : " << sat_cubes
+	cout << wu.time << " sec"
+	<< "  sat-cubes : " << sat_cubes
 	<< "  unsat-cubes : " << unsat_cubes
 	<< "  interr-cubes : " << interr_cubes
 	<< endl;
