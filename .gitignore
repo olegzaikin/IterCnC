@@ -1,0 +1,5 @@
+*.cnf
+*.o
+itercnc
+out_*
+log_*
