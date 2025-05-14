@@ -4,7 +4,7 @@
 //
 // Iterative Cube-and-Conquer on n threads.
 //
-// 1) Produce at most n cubes, run a CDCL solver on them with a time limit.
+// 1) Produce at most n cubes, run a CDCL solver on them with a conflict-limit.
 // 2) Process the results:
 //  a) if SAT is found on some cube, stop and return SAT;
 //  b) if UNSAT is proven on all cubes, stop and return UNSAT;
@@ -15,12 +15,12 @@
 //     negation-clauses for these cubes to the CNF and go to 1;
 //  e) no cubes are solved, stop and return INDET.
 //
-// Usage : itercnc la-solver cdcl-solver cnf timelimit-cube nthreads
+// Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube nthreads
 //
 // Example:
-//     ./itercnc ./march ./kissat ./problem.cnf 5000 16
+//     ./itercnc ./march ./kissat ./problem.cnf 100000 16
 //   iteratively produces at most 16 cubes on problem.cnf and runs kissat on
-//   them with the time limit of 5000 seconds.
+//   them with the limit of 100000 conflicts.
 //=============================================================================
 
 #include <iostream>
@@ -36,7 +36,7 @@
 
 using namespace std;
 
-string version = "0.0.2";
+string version = "0.0.3";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -113,7 +113,7 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 						  const bool is_add_sat_clause=false);
 
 void print_usage() {
-	cout << "Usage : itercnc la-solver cdcl-solver cnf timelimit-cube nthreads"
+	cout << "Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube nthreads"
 	     << endl;
 }
 
@@ -142,18 +142,18 @@ int main(int argc, char *argv[]) {
 	string la_solver_name = str_argv[1];
     string cdcl_solver_name = str_argv[2];
 	string cnf_name = str_argv[3];
-	unsigned cube_time_lim = stoi(str_argv[4]);
+	unsigned cube_conflict_lim = stoi(str_argv[4]);
 	unsigned nthreads = stoi(str_argv[5]);
 	const unsigned system_nthreads = thread::hardware_concurrency();
 	if (nthreads > system_nthreads) {
 		cout << "Warning : " << system_nthreads << " threads in total, but "
 		     << nthreads << " threads are requested." << endl;
 	}
-	cout << "lookahead solver : "           << la_solver_name   << endl;
-	cout << "CDCL solver : "                << cdcl_solver_name << endl;
-	cout << "cnf : "                        << cnf_name         << endl;
-	cout << "cube time limit in seconds : " << cube_time_lim    << endl;
-	cout << "number of threads : "          << nthreads         << endl;
+	cout << "lookahead solver : "           << la_solver_name    << endl;
+	cout << "CDCL solver : "                << cdcl_solver_name  << endl;
+	cout << "cnf : "                        << cnf_name          << endl;
+	cout << "cube_conflict_limit : "        << cube_conflict_lim << endl;
+	cout << "number of threads : "          << nthreads          << endl;
 
 	cout << endl;
 	cout << "Reading CNF " << cnf_name << endl;
@@ -194,7 +194,7 @@ int main(int argc, char *argv[]) {
 				continue;
 			}
 			result res = solve_cube(cur_cnf, cdcl_solver_name, program_start,
-				wu, cube_time_lim);
+				wu, cube_conflict_lim);
 			if (res == SAT) {
 				sat_cubes++;
 				cout << "SAT is found." << endl;
@@ -398,7 +398,7 @@ vector<workunit> read_cubes(const string cubes_name) {
 
 result solve_cube(const cnf c, const string solver_name,
 				  const time_point_t program_start, workunit &wu,
-				  const unsigned cube_time_lim)
+				  const unsigned cube_conflict_lim)
 {
 	string wu_id_str = to_string(wu.id);
 	string local_cnf_file_name = "id-" + wu_id_str + "-cnf";
@@ -410,9 +410,8 @@ result solve_cube(const cnf c, const string solver_name,
 	for (auto x : wu.cube) local_cnf_file << x << " 0" << endl;
 	local_cnf_file.close();
 
-	string system_str = "timelimit -t " + to_string(cube_time_lim) +
-	                         " -T 1 " + solver_name;
-	system_str += " " + local_cnf_file_name;
+	string system_str = solver_name + " --conflicts=" +
+	  to_string(cube_conflict_lim) + " " + local_cnf_file_name;
 	//cout << system_str << endl;
 	string local_out_file_name = "id-" + wu_id_str + "-out";
 	fstream local_out_file;
