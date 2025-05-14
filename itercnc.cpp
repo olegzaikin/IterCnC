@@ -36,7 +36,7 @@
 
 using namespace std;
 
-string version = "0.0.3";
+string version = "0.0.4";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -164,11 +164,14 @@ int main(int argc, char *argv[]) {
 
     // Run CnC interatively:
 	unsigned iter_num = 0;
+	unsigned prev_threshold = 0;
 	unsigned threshold = 0;
 	for (;;) {
 		cout << "*** iteration " << iter_num << endl;
 		// Find a proper cutoff threshold for cubing:
-		threshold = get_cutoff(la_solver_name, cur_cnf, threshold, nthreads);
+		cout << "prev_threshold : " << prev_threshold << endl;
+		threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads);
+		prev_threshold = threshold;
 		// Produce cubes:
 		string cubes_name = "cubes";
 		string system_str = la_solver_name + " " + cur_cnf.name + " -n " + to_string(threshold) + " -o " + cubes_name;
@@ -282,8 +285,10 @@ int main(int argc, char *argv[]) {
 
 // For a given number of threads n, find a cutoff threshold that gives at most
 // n cubes:
-unsigned get_cutoff(const string la_solver_name, const cnf cur_cnf,
-	                const unsigned prev_threshold, const unsigned nthreads) {
+unsigned get_cutoff(const string la_solver_name,
+					const cnf cur_cnf,
+	                const unsigned prev_threshold,
+					const unsigned nthreads) {
 	assert(cur_cnf.name != "");
 	assert(cur_cnf.var_num > 0);
 	const string cnf_name = cur_cnf.name;
@@ -294,6 +299,9 @@ unsigned get_cutoff(const string la_solver_name, const cnf cur_cnf,
 	assert(cur_threshold > 0);
 	cout << "Start searching for threshold from " << cur_threshold << endl;
 
+	// Increase or decrease a threshold:
+	bool is_first_calc = true;
+	bool is_descent = true;
 	for (;;) {
 		string system_str = la_solver_name + " " + cnf_name + " -n " + to_string(cur_threshold);
 		string res_str = exec(system_str);
@@ -314,12 +322,29 @@ unsigned get_cutoff(const string la_solver_name, const cnf cur_cnf,
 				break;
 			}
 		}
-		if (cubes_num > nthreads) break;
-		//cout << "cur_threshold : " << cur_threshold << endl;
-		cur_threshold--;
+		assert(cubes_num > 0);
+		if (is_first_calc) {
+			if (cubes_num <= nthreads) is_descent = true; // decrease a threshold
+			else is_descent = false; // increase a threshold
+			cout << "is_descent : " << is_descent << endl;
+			is_first_calc = false;
+		}
+		else if ((is_descent) and (cubes_num > nthreads)) {
+			// Go back to the previous value that is acceptable:
+			cur_threshold++;
+			break;
+		}
+		else if (is_descent) {
+			cur_threshold--;
+		}
+		else {
+			assert(not is_descent);
+			cur_threshold += 100;
+			is_first_calc = true;
+		}
 	}
 
-	return cur_threshold+1;
+	return cur_threshold;
 }
 
 // Run lookahead solver and parse the number of free variables from its output:
