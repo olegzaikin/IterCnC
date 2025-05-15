@@ -36,7 +36,7 @@
 
 using namespace std;
 
-string version = "0.0.4";
+string version = "0.0.5";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -303,11 +303,11 @@ unsigned get_cutoff(const string la_solver_name,
 	bool is_first_calc = true;
 	bool is_descent = true;
 	for (;;) {
-		string system_str = la_solver_name + " " + cnf_name + " -n " + to_string(cur_threshold);
+		string system_str = "timeout 10 " + la_solver_name + " " + cnf_name + " -n " + to_string(cur_threshold);
 		string res_str = exec(system_str);
 		stringstream res_sstream(res_str);
 		string str;
-		unsigned cubes_num;
+		unsigned cubes_num = 0;
 		while (getline(res_sstream, str)) {
 			// c number of cubes 2, including 0 refuted leaves
 			if (str.find("c number of cubes") != string::npos) {
@@ -322,19 +322,26 @@ unsigned get_cutoff(const string la_solver_name,
 				break;
 			}
 		}
-		assert(cubes_num > 0);
+		if (cubes_num == 0) {
+			cout << "No cubes where found in the call : " << endl << system_str << endl;
+		}
+		
+		// cubes_num == 0 if lookahead was interrupted due to the time limit:
 		if (is_first_calc) {
-			if (cubes_num <= nthreads) is_descent = true; // decrease a threshold
+			if ((cubes_num > 0) and (cubes_num <= nthreads)) is_descent = true; // decrease a threshold
 			else is_descent = false; // increase a threshold
 			cout << "is_descent : " << is_descent << endl;
 			is_first_calc = false;
 		}
-		else if ((is_descent) and (cubes_num > nthreads)) {
+		
+		if ((is_descent) and (cubes_num > nthreads)) {
 			// Go back to the previous value that is acceptable:
 			cur_threshold++;
 			break;
 		}
 		else if (is_descent) {
+			assert((cubes_num > 0) and (cubes_num <= nthreads));
+			// Decrease the threshold:
 			cur_threshold--;
 		}
 		else {
