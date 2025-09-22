@@ -31,12 +31,14 @@
 #include <cassert>
 #include <chrono>
 #include <thread>
+#include <set>
+#include <algorithm>
 
 #include <omp.h>
 
 using namespace std;
 
-string version = "0.0.5";
+string version = "0.1.0";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -96,10 +98,12 @@ struct cnf {
 unsigned get_cutoff(const string la_solver_name,
 	                const cnf cur_cnf,
 					const unsigned prev_threshold,
-	                const unsigned nthreads);
+	                const unsigned nthreads,
+					set<string> interr_cubes_set);
 unsigned get_free_vars(const string la_solver_name, const cnf cur_cnf);
 string exec(const string cmd_str);
 vector<workunit> read_cubes(const string cubes_name);
+bool is_empty_file(const string fname);
 result solve_cube(const cnf c, const string solver_name,
 	              const time_point_t program_start, workunit &wu,
 				  const unsigned cube_time_lim);
@@ -119,6 +123,20 @@ void print_usage() {
 
 void print_version() {
 	cout << "version: " << version << endl;
+}
+
+// Form a string representation of a cube (as an array in integers):
+string cube_to_str(const cube_t cube) {
+	cube_t sorted_cube = cube;
+	sort(sorted_cube.begin(), sorted_cube.end());
+	assert(sorted_cube == cube);
+	string res_str = "";
+	for (unsigned i=0; i<cube.size(); i++) {
+		res_str += to_string(cube[i]);
+		if (i < cube.size()-1) res_str += "+";
+	}
+	assert(res_str != "");
+	return res_str;
 }
 
 int main(int argc, char *argv[]) {
@@ -166,31 +184,38 @@ int main(int argc, char *argv[]) {
 	unsigned iter_num = 0;
 	unsigned prev_threshold = 0;
 	unsigned threshold = 0;
+	set<string> interr_cubes_set;
 	for (;;) {
 		cout << "*** iteration " << iter_num << endl;
 		// Find a proper cutoff threshold for cubing:
 		cout << "prev_threshold : " << prev_threshold << endl;
-		threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads);
+		threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads, interr_cubes_set);
 		prev_threshold = threshold;
 		// Produce cubes:
 		string cubes_name = "cubes";
 		string system_str = la_solver_name + " " + cur_cnf.name + " -n " + to_string(threshold) + " -o " + cubes_name;
 		exec(system_str);
 		vector<workunit> wu_vec = read_cubes(cubes_name);
-		cout << "threshold : " << threshold << " gives " << wu_vec.size() << " cubes" << endl;
-		//cout << wu_vec.size() << " cubes were read" << endl;
+		vector<workunit> nontried_wu_vec;
+		for (auto &wu : wu_vec) {
+			string cube_str = cube_to_str(wu.cube);
+			if (interr_cubes_set.find(cube_str) == interr_cubes_set.end()) {
+				nontried_wu_vec.push_back(wu);
+			}
+		}
+		cout << "threshold : " << threshold << " gives " << nontried_wu_vec.size() << " non-tried cubes and " << wu_vec.size() << " cubes in total." << endl;
 		cout << "first cubes : " << endl;
-		unsigned maxprint = wu_vec.size() >= 3 ? 3 : wu_vec.size(); 
-		for (unsigned i = 0; i < maxprint; i++) wu_vec[i].print();
+		unsigned maxprint = nontried_wu_vec.size() >= 3 ? 3 : nontried_wu_vec.size(); 
+		for (unsigned i = 0; i < maxprint; i++) nontried_wu_vec[i].print();
 		unsigned sat_cubes = 0;
 		unsigned unsat_cubes = 0;
 		unsigned interr_cubes = 0;
 		unsigned skipped_cubes = 0;
-		size_t wus_num = wu_vec.size();
+		size_t wus_num = nontried_wu_vec.size();
 		bool is_add_sat_clause = false;
 		// Process all workunits in parallel:
 		#pragma omp parallel for schedule(dynamic, 1)
-		for (auto &wu : wu_vec) {
+		for (auto &wu : nontried_wu_vec) {
 			// Skip a cube because SAT is found:
 			if (sat_cubes) {
 				skipped_cubes++;
@@ -211,8 +236,18 @@ int main(int argc, char *argv[]) {
 				print_stats(wu, sat_cubes, unsat_cubes, interr_cubes);
 			}
 			else {
+				// A CDCL solver was interrupted due to a time limit:
 				interr_cubes++;
 				assert(res == INTERR);
+				string cube_str = cube_to_str(wu.cube);
+				// If a cube not in the set, add it:
+				cout << cube_str << endl;
+				// An already processed cube must be excluded from the current list:
+				assert(interr_cubes_set.find(cube_str) == interr_cubes_set.end());
+				interr_cubes_set.insert(cube_str);
+				//else {
+				//	cout << "Already interrupted cube : " << cube_str << endl;
+				//}
 				print_stats(wu, sat_cubes, unsat_cubes, interr_cubes);
 			}
 			// If all but one solved and UNSAT, interrupt the remaining one:
@@ -256,7 +291,7 @@ int main(int argc, char *argv[]) {
 			assert(skipped_cubes == 0);
 			assert(unsat_cubes + interr_cubes == wus_num);
 			// Make a new cnf where unsat-cubes are added as clauses:
-			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, wu_vec, iter_num);
+			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, nontried_wu_vec, iter_num);
 			cout << "new iteration on CNF " << new_cnf.name << endl;
 			cur_cnf = new_cnf;
 		}
@@ -269,7 +304,7 @@ int main(int argc, char *argv[]) {
 			assert(interr_cubes == 1);
 			// Make a new cnf where unsat-cubes are added negation-clauses,
 			// while the remaining cube is added as unit clauses:
-			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, wu_vec, iter_num, true);
+			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, nontried_wu_vec, iter_num, true);
 			cout << "new iteration on CNF " << new_cnf.name << endl;
 			cur_cnf = new_cnf;
 		}
@@ -288,7 +323,8 @@ int main(int argc, char *argv[]) {
 unsigned get_cutoff(const string la_solver_name,
 					const cnf cur_cnf,
 	                const unsigned prev_threshold,
-					const unsigned nthreads) {
+					const unsigned nthreads,
+					set<string> interr_cubes_set) {
 	assert(cur_cnf.name != "");
 	assert(cur_cnf.var_num > 0);
 	const string cnf_name = cur_cnf.name;
@@ -299,34 +335,67 @@ unsigned get_cutoff(const string la_solver_name,
 	assert(cur_threshold > 0);
 	cout << "Start searching for threshold from " << cur_threshold << endl;
 
-	// Increase or decrease a threshold:
-	bool is_first_calc = true;
-	bool is_descent = true;
+	string cubes_name = "cubes";
+	unsigned cubes_num = 0;
+	set<unsigned> tried_thresholds;
 	for (;;) {
-		string system_str = "timeout 10 " + la_solver_name + " " + cnf_name + " -n " + to_string(cur_threshold);
-		string res_str = exec(system_str);
-		stringstream res_sstream(res_str);
-		string str;
-		unsigned cubes_num = 0;
-		while (getline(res_sstream, str)) {
-			// c number of cubes 2, including 0 refuted leaves
-			if (str.find("c number of cubes") != string::npos) {
-				stringstream sstream(str);
-				string word;
-				vector<string> words;
-				while (sstream >> word) words.push_back(word);
-				assert(words.size() == 9);
-				// Cut off a comma at the end:
-				cubes_num = stoi(words[4].substr(0, words[4].length() - 1));
-				//cout << "cubes_num : " << cubes_num << endl;
-				break;
+		// Erase the file with cubes since when interrupted lookahead does not write to it:
+		ofstream ofile(cubes_name, ios_base::out | ios_base::trunc);
+		ofile.close();
+		//
+		string system_str = "timeout 10 " + la_solver_name + " " + cnf_name + " -n " + to_string(cur_threshold) + " -o " + cubes_name;
+		tried_thresholds.insert(cur_threshold);
+		exec(system_str);
+		bool is_interrupted_la = is_empty_file(cubes_name);
+
+		vector<workunit> wu_vec = read_cubes(cubes_name);
+		unsigned all_cubes_num = wu_vec.size();
+		vector<workunit> nontried_wu_vec;
+		for (auto &wu : wu_vec) {
+			string cube_str = cube_to_str(wu.cube);
+			if (interr_cubes_set.find(cube_str) == interr_cubes_set.end()) {
+				nontried_wu_vec.push_back(wu);
 			}
 		}
-		if (cubes_num == 0) {
+		if (all_cubes_num == 0) {
 			cout << "No cubes where found in the call : " << endl << system_str << endl;
 		}
-		
-		// cubes_num == 0 if lookahead was interrupted due to the time limit:
+
+		cubes_num = nontried_wu_vec.size();
+		cout << cubes_num << " non-tried cubes out of " << all_cubes_num << " on n " << cur_threshold << endl;
+
+		// If lookahead was interrupted due to the time limit:
+		if (is_interrupted_la) {
+			assert(all_cubes_num == 0 and cubes_num == 0);
+			// Go back to the last acceptable threshold:
+			cur_threshold++;
+		}
+		else if ((cubes_num >= 0) and (cubes_num < nthreads)) {
+			// If a decreased threshold has already been tried, break:
+			if (tried_thresholds.find(cur_threshold-1) != tried_thresholds.end()) {
+				cout << "Don't try threshold " << cur_threshold-1 << " since it has already been tried." << endl;
+				break;
+			}
+			// Decrease the threshold to get more cubes:
+			cur_threshold--;
+		}
+		// Exectly the required number of cubes:
+		else if (cubes_num == nthreads) {
+			break;
+		}
+		else if (cubes_num > nthreads) {
+			assert(is_interrupted_la == false);
+			// If an increased threshold has already been tried, break:
+			if (tried_thresholds.find(cur_threshold+1) != tried_thresholds.end()) {
+				cout << "Choose threshold " << cur_threshold+1 << " since it the last one gave less than threshold." << endl;
+				cur_threshold++;
+				break;
+			}
+			// Go back to the last acceptable threshold (cubes_num < nthreads):
+			cur_threshold++;
+		}
+
+		/*
 		if (is_first_calc) {
 			if ((cubes_num > 0) and (cubes_num <= nthreads)) is_descent = true; // decrease a threshold
 			else is_descent = false; // increase a threshold
@@ -340,15 +409,17 @@ unsigned get_cutoff(const string la_solver_name,
 			break;
 		}
 		else if (is_descent) {
-			assert((cubes_num > 0) and (cubes_num <= nthreads));
+			assert((cubes_num >= 0) and (cubes_num <= nthreads));
 			// Decrease the threshold:
 			cur_threshold--;
 		}
 		else {
+			// Restart:
 			assert(not is_descent);
 			cur_threshold += 100;
 			is_first_calc = true;
 		}
+		*/
 	}
 
 	return cur_threshold;
@@ -410,22 +481,45 @@ vector<workunit> read_cubes(const string cubes_name) {
 	while (getline(cubes_file, str)) {
 		sstream << str;
 		string word;
+		cube_t cube;
+		while (sstream >> word) {
+			if (word == "a" or word == "0") continue;
+			cube.push_back(stoi(word));
+		}
+		// If there is no cube in the string, skip it:
+		if (cube.size() == 0) continue;
+		sort(cube.begin(), cube.end());
 		workunit wu;
 		assert(wu.id == -1);
 		assert(wu.stts == NOT_STARTED);
 		assert(wu.rslt == INTERR);
 		assert(wu.time == -1);
-		while (sstream >> word) {
-			if (word == "a" or word == "0") continue;
-			wu.cube.push_back(stoi(word));
-		}
+		wu.cube = cube;
 		sstream.str(""); sstream.clear();
 		wu.id = id++;
 		wu_vec.push_back(wu);
 	}
 	cubes_file.close();
-	assert(wu_vec.size() > 0);
 	return wu_vec;
+}
+
+// Check if a text file is empty:
+bool is_empty_file(const string fname) {
+	ifstream ifile(fname);
+	if (!ifile.is_open()) {
+		cerr << "file " << fname << " wasn't opened" << endl;
+		exit(EXIT_FAILURE);
+	}
+	
+	string str;
+	stringstream sstream;
+	vector<workunit> wu_vec;
+	int id = 0;
+	while (getline(ifile, str)) {
+		if (str != "") return false;
+	}
+	ifile.close();
+	return true;
 }
 
 result solve_cube(const cnf c, const string solver_name,
