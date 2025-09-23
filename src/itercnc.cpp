@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.0";
+string version = "0.1.1";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -211,7 +211,9 @@ int main(int argc, char *argv[]) {
 		unsigned unsat_cubes = 0;
 		unsigned interr_cubes = 0;
 		unsigned skipped_cubes = 0;
-		size_t wus_num = nontried_wu_vec.size();
+		size_t wus_num = wu_vec.size();
+		size_t nontried_wus_num = nontried_wu_vec.size();
+		assert(nontried_wus_num <= wus_num);
 		bool is_add_sat_clause = false;
 		// Process all workunits in parallel:
 		#pragma omp parallel for schedule(dynamic, 1)
@@ -263,21 +265,22 @@ int main(int argc, char *argv[]) {
 		cout << "Result : ";
 		// If at least one cube-problem is SAT, return SAT:
 		if (sat_cubes) {
-			assert(unsat_cubes < wus_num);
-			assert(interr_cubes < wus_num);
-			assert(skipped_cubes + sat_cubes + unsat_cubes + interr_cubes == wus_num);
+			assert(unsat_cubes < nontried_wus_num);
+			assert(interr_cubes < nontried_wus_num);
+			assert(skipped_cubes + sat_cubes + unsat_cubes + interr_cubes == nontried_wus_num);
 			cout << "SAT" << endl;
 			break;
 		}
-		// If all cube-problems are UNSAT, return UNSAT: 
+		// If all (generated) cube-problems are UNSAT, return UNSAT: 
 		else if (unsat_cubes == wus_num) {
 			assert(sat_cubes == 0);
 			assert(interr_cubes == 0);
 			cout << "UNSAT" << endl;
 			break;
 		}
-		// If all cube-problems were interrupted, return INTERRUPTED:
-		else if (interr_cubes == wus_num) {
+		// If all (previously non-interrupted) cube-problems are interrupted, return INTERRUPTED
+		// since no negation-clauses are added to a CNF:
+		else if (interr_cubes == nontried_wus_num) {
 			assert(sat_cubes == 0);
 			assert(unsat_cubes == 0);
 			cout << "INTERRUPTED" << endl;
@@ -286,11 +289,11 @@ int main(int argc, char *argv[]) {
 		// If at least one cube-problem is UNSAT and at least one cube-problem
 		// is interrupted:
 		else if (not is_add_sat_clause and unsat_cubes > 0) {
-			assert(unsat_cubes < wus_num);
+			assert(unsat_cubes < nontried_wus_num);
 			assert(sat_cubes == 0);
 			assert(skipped_cubes == 0);
-			assert(unsat_cubes + interr_cubes == wus_num);
-			// Make a new cnf where unsat-cubes are added as clauses:
+			assert(unsat_cubes + interr_cubes == nontried_wus_num);
+			// Make a new cnf where negation-clauses are added for unsat cubes:
 			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, nontried_wu_vec, iter_num);
 			cout << "new iteration on CNF " << new_cnf.name << endl;
 			cur_cnf = new_cnf;
@@ -302,7 +305,7 @@ int main(int argc, char *argv[]) {
 			assert(sat_cubes == 0);
 			assert(skipped_cubes == 0);
 			assert(interr_cubes == 1);
-			// Make a new cnf where unsat-cubes are added negation-clauses,
+			// Make a new cnf where negation-clauses are added to unsat-cubes,
 			// while the remaining cube is added as unit clauses:
 			cnf new_cnf = add_sat_unsat_clauses(cur_cnf, nontried_wu_vec, iter_num, true);
 			cout << "new iteration on CNF " << new_cnf.name << endl;
@@ -394,32 +397,6 @@ unsigned get_cutoff(const string la_solver_name,
 			// Go back to the last acceptable threshold (cubes_num < nthreads):
 			cur_threshold++;
 		}
-
-		/*
-		if (is_first_calc) {
-			if ((cubes_num > 0) and (cubes_num <= nthreads)) is_descent = true; // decrease a threshold
-			else is_descent = false; // increase a threshold
-			cout << "is_descent : " << is_descent << endl;
-			is_first_calc = false;
-		}
-		
-		if ((is_descent) and (cubes_num > nthreads)) {
-			// Go back to the previous value that is acceptable:
-			cur_threshold++;
-			break;
-		}
-		else if (is_descent) {
-			assert((cubes_num >= 0) and (cubes_num <= nthreads));
-			// Decrease the threshold:
-			cur_threshold--;
-		}
-		else {
-			// Restart:
-			assert(not is_descent);
-			cur_threshold += 100;
-			is_first_calc = true;
-		}
-		*/
 	}
 
 	return cur_threshold;
