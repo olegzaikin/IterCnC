@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.1";
+string version = "0.1.3";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -289,7 +289,7 @@ int main(int argc, char *argv[]) {
 		// If at least one cube-problem is UNSAT and at least one cube-problem
 		// is interrupted:
 		else if (not is_add_sat_clause and unsat_cubes > 0) {
-			assert(unsat_cubes < nontried_wus_num);
+			assert(unsat_cubes <= nontried_wus_num);
 			assert(sat_cubes == 0);
 			assert(skipped_cubes == 0);
 			assert(unsat_cubes + interr_cubes == nontried_wus_num);
@@ -316,6 +316,17 @@ int main(int argc, char *argv[]) {
 		cout << endl;
 	}
 
+	cout << interr_cubes_set.size() << " interrupted cubes in set" << endl;
+	cout << "Writing interrupted cubes to file interrupted_cubes" << endl;
+	ofstream ofile("interrupted_cubes", ios_base::out);
+	for (auto x : interr_cubes_set) {
+		for (auto y : x) {
+			if (y == '+') ofile << " ";
+			else ofile << y;
+		}
+		ofile << " 0" << endl;
+	}
+	ofile.close();
 	print_elapsed_time(program_start);
 
     return 0;
@@ -619,7 +630,6 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 		else inter_cubes.push_back(wu.cube);
 	}
 	assert(not unsat_cubes.empty());
-	assert(not inter_cubes.empty());
 	string new_cnf_name;
 	// If an original CNF name is given:
 	size_t pos_iter = cur_cnf.name.find("_iter");
@@ -638,11 +648,13 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 	// Make a new CNF file:
 	ofstream ofile(new_cnf_name, ios_base::out);
 	unsigned cla_num = cur_cnf.clause_num + unsat_cubes.size();
-	if (is_add_sat_clause) cla_num += inter_cubes[0].size();
+	if (is_add_sat_clause) {
+		assert(inter_cubes.size() == 1 and unsat_cubes.size() == wus_num-1);
+		cla_num += inter_cubes[0].size();
+	}
 	ofile << "p cnf " << cur_cnf.var_num << " " << cla_num << endl;
 	// Add unit clauses for the only unprocessed cube if needed:
 	if (is_add_sat_clause) {
-		assert(inter_cubes.size() == 1 and unsat_cubes.size() == wus_num-1);
 		string str = "";
 		for (auto &lit : inter_cubes[0]) {
 			ofile << lit << " 0" << endl;
