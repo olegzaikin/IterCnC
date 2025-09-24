@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.3";
+string version = "0.1.4";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -104,9 +104,9 @@ unsigned get_free_vars(const string la_solver_name, const cnf cur_cnf);
 string exec(const string cmd_str);
 vector<workunit> read_cubes(const string cubes_name);
 bool is_empty_file(const string fname);
-result solve_cube(const cnf c, const string solver_name,
-	              const time_point_t program_start, workunit &wu,
-				  const unsigned cube_time_lim);
+result solve_cube(const string base_cnf_name, const cnf c,
+				  const string solver_name, const time_point_t program_start,
+				  workunit &wu, const unsigned cube_time_lim);
 result read_solver_result(const string fname);
 void print_stats(const workunit wu, const unsigned sat_cubes,
 	             const unsigned unsat_cubes, const unsigned interr_cubes);
@@ -178,6 +178,10 @@ int main(int argc, char *argv[]) {
 	cnf cur_cnf(cnf_name);
 	cur_cnf.print();
 
+	size_t pos_cnf = cnf_name.find(".cnf");
+	assert(pos_cnf != string::npos);
+	string base_cnf_name = cnf_name.substr(0, pos_cnf);
+
 	const time_point_t program_start = chrono::system_clock::now();
 
     // Run CnC interatively:
@@ -223,8 +227,8 @@ int main(int argc, char *argv[]) {
 				skipped_cubes++;
 				continue;
 			}
-			result res = solve_cube(cur_cnf, cdcl_solver_name, program_start,
-				wu, cube_conflict_lim);
+			result res = solve_cube(base_cnf_name, cur_cnf, cdcl_solver_name,
+				program_start, wu, cube_conflict_lim);
 			if (res == SAT) {
 				sat_cubes++;
 				cout << "SAT is found." << endl;
@@ -318,7 +322,7 @@ int main(int argc, char *argv[]) {
 
 	cout << interr_cubes_set.size() << " interrupted cubes in set" << endl;
 	cout << "Writing interrupted cubes to file interrupted_cubes" << endl;
-	ofstream ofile("interrupted_cubes", ios_base::out);
+	ofstream ofile("interrupted_cubes_" + base_cnf_name, ios_base::out);
 	for (auto x : interr_cubes_set) {
 		for (auto y : x) {
 			if (y == '+') ofile << " ";
@@ -510,9 +514,9 @@ bool is_empty_file(const string fname) {
 	return true;
 }
 
-result solve_cube(const cnf c, const string solver_name,
-				  const time_point_t program_start, workunit &wu,
-				  const unsigned cube_conflict_lim)
+result solve_cube(const string base_cnf_name, const cnf c,
+				  const string solver_name, const time_point_t program_start,
+				  workunit &wu, const unsigned cube_conflict_lim)
 {
 	string wu_id_str = to_string(wu.id);
 	string local_cnf_file_name = "id-" + wu_id_str + "-cnf";
@@ -548,7 +552,7 @@ result solve_cube(const cnf c, const string solver_name,
 	if (res == SAT) {
 		const time_point_t program_end = chrono::system_clock::now();
 		const double elapsed = chrono::duration_cast<chrono::seconds>(program_end - program_start).count();
-		string fname = "!sat_info_cube_id_" + to_string(wu.id);
+		string fname = "!sat_" + base_cnf_name + "_info_cube_id_" + wu_id_str;
 		ofstream ofile(fname, ios_base::out);
 		ofile << "SAT" << endl;
 		ofile << "elapsed : " << elapsed << " seconds" << endl;
@@ -558,11 +562,11 @@ result solve_cube(const cnf c, const string solver_name,
 		for (auto &x : wu.cube) ofile << x << " ";
 		ofile << endl;
 		ofile.close();
-		system_str = "cp " + local_out_file_name + " ./!sat_out_cube_id_" +
-		             wu_id_str;
+		fname = "./!sat_" + base_cnf_name + "_out_cube_id_" + wu_id_str;
+		system_str = "cp " + local_out_file_name + " " + fname;
 		exec(system_str);
-		system_str = "cp " + local_cnf_file_name +
-		             " ./!sat_cnf_cube_id_" + wu_id_str;
+		fname = "./!sat_" + base_cnf_name + "_cnf_cube_id_" + wu_id_str;
+		system_str = "cp " + local_cnf_file_name + " " + fname;
 		exec(system_str);
 	}
 
