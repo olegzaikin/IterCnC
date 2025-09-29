@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.4";
+string version = "0.1.5";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -117,8 +117,8 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 						  const bool is_add_sat_clause=false);
 
 void print_usage() {
-	cout << "Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube nthreads"
-	     << endl;
+	cout << "Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube "
+	     << "nthreads [-n=<unsigned>]" << endl;
 }
 
 void print_version() {
@@ -162,16 +162,23 @@ int main(int argc, char *argv[]) {
 	string cnf_name = str_argv[3];
 	unsigned cube_conflict_lim = stoi(str_argv[4]);
 	unsigned nthreads = stoi(str_argv[5]);
+	unsigned constant_threshold = 0;
+	if (argc >= 7) {
+		string str = str_argv[6];
+		if (str.rfind("-n=", 0) == 0) constant_threshold = stoi(str.substr(3, str.size()-3));
+	}
+
 	const unsigned system_nthreads = thread::hardware_concurrency();
 	if (nthreads > system_nthreads) {
 		cout << "Warning : " << system_nthreads << " threads in total, but "
 		     << nthreads << " threads are requested." << endl;
 	}
-	cout << "lookahead solver : "           << la_solver_name    << endl;
-	cout << "CDCL solver : "                << cdcl_solver_name  << endl;
-	cout << "cnf : "                        << cnf_name          << endl;
-	cout << "cube_conflict_limit : "        << cube_conflict_lim << endl;
-	cout << "number of threads : "          << nthreads          << endl;
+	cout << "lookahead solver : "    << la_solver_name     << endl;
+	cout << "CDCL solver : "         << cdcl_solver_name   << endl;
+	cout << "cnf : "                 << cnf_name           << endl;
+	cout << "cube_conflict_limit : " << cube_conflict_lim  << endl;
+	cout << "number of threads : "   << nthreads           << endl;
+	cout << "constant threshold : "  << constant_threshold << endl;
 
 	cout << endl;
 	cout << "Reading CNF " << cnf_name << endl;
@@ -191,10 +198,16 @@ int main(int argc, char *argv[]) {
 	set<string> interr_cubes_set;
 	for (;;) {
 		cout << "*** iteration " << iter_num << endl;
-		// Find a proper cutoff threshold for cubing:
-		cout << "prev_threshold : " << prev_threshold << endl;
-		threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads, interr_cubes_set);
-		prev_threshold = threshold;
+		// If threshold is given, just use it:
+		if (constant_threshold > 0) {
+			threshold = constant_threshold;
+		}
+		// Otherwise, find a proper cutoff threshold for cubing:
+		else {
+			cout << "prev_threshold : " << prev_threshold << endl;
+			threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads, interr_cubes_set);
+			prev_threshold = threshold;
+		}
 		// Produce cubes:
 		string cubes_name = "cubes";
 		string system_str = la_solver_name + " " + cur_cnf.name + " -n " + to_string(threshold) + " -o " + cubes_name;
@@ -207,7 +220,10 @@ int main(int argc, char *argv[]) {
 				nontried_wu_vec.push_back(wu);
 			}
 		}
-		cout << "threshold : " << threshold << " gives " << nontried_wu_vec.size() << " non-tried cubes and " << wu_vec.size() << " cubes in total." << endl;
+		// Print statistics:
+		cout << "threshold : " << threshold << " gives "
+			 << nontried_wu_vec.size() << " non-tried cubes and "
+			 << wu_vec.size() << " cubes in total." << endl;
 		cout << "first cubes : " << endl;
 		unsigned maxprint = nontried_wu_vec.size() >= 3 ? 3 : nontried_wu_vec.size(); 
 		for (unsigned i = 0; i < maxprint; i++) nontried_wu_vec[i].print();
