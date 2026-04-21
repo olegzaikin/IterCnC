@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.7";
+string version = "0.1.8";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -270,7 +270,7 @@ int main(int argc, char *argv[]) {
 				assert(res == INTERR);
 				string cube_str = cube_to_str(wu.cube);
 				// If a cube not in the set, add it:
-				cout << cube_str << endl;
+				// cout << cube_str << endl;
 				// An already processed cube must be excluded from the current list:
 				assert(interr_cubes_set.find(cube_str) == interr_cubes_set.end());
 				interr_cubes_set.insert(cube_str);
@@ -571,7 +571,6 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	local_out_file << res_str;
 	local_out_file.close(); local_out_file.clear();
 
-	cout << local_out_file_name << endl;
 	result res = read_solver_result(local_out_file_name);
 	wu.rslt = res;
 	wu.stts = PROCESSED;
@@ -581,7 +580,6 @@ result solve_cube(const string base_cnf_name, const cnf c,
 		const time_point_t program_end = chrono::system_clock::now();
 		const double elapsed = chrono::duration_cast<chrono::seconds>(program_end - program_start).count();
 		string fname = "!sat_" + base_cnf_name + "_info_cube_id_" + wu_id_str;
-		cout << "***" << endl;
 		ofstream ofile(fname, ios_base::out);
 		ofile << "SAT" << endl;
 		ofile << "elapsed wall time since program start : " << elapsed << " seconds" << endl;
@@ -601,7 +599,6 @@ result solve_cube(const string base_cnf_name, const cnf c,
 
 	// Remove a file with the current CNF and a file with the solver result:
 	system_str = "rm id-" + wu_id_str + "-*";
-	cout << system_str << endl;
 	exec(system_str);
 	return res;
 }
