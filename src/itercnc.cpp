@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.5";
+string version = "0.1.6";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -119,6 +119,9 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 void print_usage() {
 	cout << "Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube "
 	     << "nthreads [-n=<unsigned>]" << endl;
+	cout << "  -n sets a constant threshold that is used every iteration." << endl;
+	cout << "  Without a given constant threshold, a suitable threshold is"
+		 << "  found every iteration." << endl;
 }
 
 void print_version() {
@@ -188,6 +191,8 @@ int main(int argc, char *argv[]) {
 	size_t pos_cnf = cnf_name.find(".cnf");
 	assert(pos_cnf != string::npos);
 	string base_cnf_name = cnf_name.substr(0, pos_cnf);
+	erase(base_cnf_name, '.');
+	erase(base_cnf_name, '/');
 
 	const time_point_t program_start = chrono::system_clock::now();
 
@@ -213,6 +218,8 @@ int main(int argc, char *argv[]) {
 		string system_str = la_solver_name + " " + cur_cnf.name + " -n " + to_string(threshold) + " -o " + cubes_name;
 		exec(system_str);
 		vector<workunit> wu_vec = read_cubes(cubes_name);
+		system_str = "rm " + cubes_name;
+		exec(system_str);
 		vector<workunit> nontried_wu_vec;
 		for (auto &wu : wu_vec) {
 			string cube_str = cube_to_str(wu.cube);
@@ -564,14 +571,15 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	wu.rslt = res;
 	wu.stts = PROCESSED;
 
-	// Remove temporary files:
+	// Save information about a SAT cube:
 	if (res == SAT) {
 		const time_point_t program_end = chrono::system_clock::now();
 		const double elapsed = chrono::duration_cast<chrono::seconds>(program_end - program_start).count();
 		string fname = "!sat_" + base_cnf_name + "_info_cube_id_" + wu_id_str;
+		cout << "***" << endl;
 		ofstream ofile(fname, ios_base::out);
 		ofile << "SAT" << endl;
-		ofile << "elapsed : " << elapsed << " seconds" << endl;
+		ofile << "elapsed wall time since program start : " << elapsed << " seconds" << endl;
 		ofile << "solver time : " << wu.time << " s" << endl;
 		ofile << "cube id : " << wu.id << endl;
 		ofile << "cube : " << endl;
@@ -586,7 +594,8 @@ result solve_cube(const string base_cnf_name, const cnf c,
 		exec(system_str);
 	}
 
-	system_str = "rm id-" + wu_id_str + "-*";
+	// Remove a file with the current CNF and a file with the solver result:
+	system_str = "rm id-" + wu_id_str + "*";
 	exec(system_str);
 	return res;
 }
