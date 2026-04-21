@@ -38,7 +38,7 @@
 
 using namespace std;
 
-string version = "0.1.6";
+string version = "0.1.7";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -288,6 +288,10 @@ int main(int argc, char *argv[]) {
 			}
 		}
 		cout << "skipped-cubes : " << skipped_cubes << endl;
+
+		// Remove temporary files:
+		system_str = "rm id-*";
+		exec(system_str);
 
 		cout << "Result : ";
 		// If at least one cube-problem is SAT, return SAT:
@@ -567,6 +571,7 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	local_out_file << res_str;
 	local_out_file.close(); local_out_file.clear();
 
+	cout << local_out_file_name << endl;
 	result res = read_solver_result(local_out_file_name);
 	wu.rslt = res;
 	wu.stts = PROCESSED;
@@ -595,7 +600,8 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	}
 
 	// Remove a file with the current CNF and a file with the solver result:
-	system_str = "rm id-" + wu_id_str + "*";
+	system_str = "rm id-" + wu_id_str + "-*";
+	cout << system_str << endl;
 	exec(system_str);
 	return res;
 }
