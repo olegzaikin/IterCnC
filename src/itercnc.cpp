@@ -4,23 +4,29 @@
 //
 // Iterative Cube-and-Conquer on n threads.
 //
-// 1) Produce at most n cubes, run a CDCL solver on them with a conflict-limit.
-// 2) Process the results:
+// 1) Produces at most n cubes, runs a CDCL solver on them with a conflict
+//    limit.
+// 2) Processes the iteration's results:
 //  a) if SAT is found on some cube, stop and return SAT;
 //  b) if UNSAT is proven on all cubes, stop and return UNSAT;
 //  c) if all but one cubes are solved and UNSAT, stop processing the remaining
-//     cube, add negation-clauses for the UNSAT-cubes and one-literal clauses
-//     for the unsolved cube to the CNF, go to 1.
-//  d) if at least one cube is solved and all solved are UNSAT, add
-//     negation-clauses for these cubes to the CNF and go to 1;
-//  e) no cubes are solved, stop and return INDET.
+//     cube, add negation-clauses for the UNSAT-cubes to the CNF and one
+//     literal clauses for the unsolved cube to the CNF, go to 1;
+//  d) if at least one cube is solved, all those solved are UNSAT, and
+//     processing of the remaining cubes is interrupted due to the conflict
+//     limit, add negation-clauses for the UNSAT-cubes to the CNF and go to 1;
+//  e) no cubes are solved within the conflict limit - stop and return INDET.
 //
-// Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube nthreads
+// Usage : itercnc la-solver cdcl-solver cnf nthreads [conflict-limit-cube] 
 //
-// Example:
-//     ./itercnc ./march ./kissat ./problem.cnf 100000 16
+// Example 1:
+//     ./itercnc ./march ./kissat ./problem.cnf 16 100000 
 //   iteratively produces at most 16 cubes on problem.cnf and runs kissat on
 //   them with the limit of 100000 conflicts.
+// Example 2:
+//     ./itercnc ./march ./kissat ./problem.cnf 16 
+//   iteratively produces at most 16 cubes on problem.cnf and runs kissat on
+//   them without any limit.
 //=============================================================================
 
 #include <iostream>
@@ -38,7 +44,7 @@
 
 using namespace std;
 
-string version = "0.1.8";
+string version = "0.1.9";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -117,11 +123,13 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 						  const bool is_add_sat_clause=false);
 
 void print_usage() {
-	cout << "Usage : itercnc la-solver cdcl-solver cnf conflict-limit-cube "
-	     << "nthreads [-n=<unsigned>]" << endl;
+	cout << "Usage : itercnc la-solver cdcl-solver cnf nthreads"
+	     << "[conflict-limit-cube] [-n=<unsigned>]" << endl;
+	cout << "  If conflict-limit-cube is not given, then CDCL solver is "; 
+	cout << "unlimited";
 	cout << "  -n sets a constant threshold that is used every iteration." << endl;
 	cout << "  Without a given constant threshold, a suitable threshold is"
-		 << "  found every iteration." << endl;
+		 << "found every iteration." << endl;
 }
 
 void print_version() {
@@ -155,7 +163,7 @@ int main(int argc, char *argv[]) {
 		print_version();
 		exit(EXIT_SUCCESS);
 	}
-	if (argc < 6) {
+	if (argc < 5) {
 		print_usage();
 		exit(EXIT_FAILURE);
 	}
@@ -163,8 +171,11 @@ int main(int argc, char *argv[]) {
 	string la_solver_name = str_argv[1];
     string cdcl_solver_name = str_argv[2];
 	string cnf_name = str_argv[3];
-	unsigned cube_conflict_lim = stoi(str_argv[4]);
-	unsigned nthreads = stoi(str_argv[5]);
+	unsigned nthreads = stoi(str_argv[4]);
+	unsigned cube_conflict_lim = 0;
+	if (argc >= 6) {
+		cube_conflict_lim = stoi(str_argv[5]);
+	}
 	unsigned constant_threshold = 0;
 	if (argc >= 7) {
 		string str = str_argv[6];
@@ -179,8 +190,8 @@ int main(int argc, char *argv[]) {
 	cout << "lookahead solver : "    << la_solver_name     << endl;
 	cout << "CDCL solver : "         << cdcl_solver_name   << endl;
 	cout << "cnf : "                 << cnf_name           << endl;
-	cout << "cube_conflict_limit : " << cube_conflict_lim  << endl;
 	cout << "number of threads : "   << nthreads           << endl;
+	cout << "cube_conflict_limit : " << cube_conflict_lim  << endl;
 	cout << "constant threshold : "  << constant_threshold << endl;
 
 	cout << endl;
@@ -555,8 +566,11 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	for (auto x : wu.cube) local_cnf_file << x << " 0" << endl;
 	local_cnf_file.close();
 
-	string system_str = solver_name + " --conflicts=" +
-	  to_string(cube_conflict_lim) + " " + local_cnf_file_name;
+	string system_str = solver_name;
+	if (cube_conflict_lim > 0) {
+		system_str += " --conflicts=" + to_string(cube_conflict_lim);
+	}
+	system_str += " " + local_cnf_file_name;
 	//cout << system_str << endl;
 	string local_out_file_name = "id-" + wu_id_str + "-out";
 	fstream local_out_file;
