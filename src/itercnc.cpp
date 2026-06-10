@@ -44,7 +44,7 @@
 
 using namespace std;
 
-string version = "0.1.10";
+string version = "0.1.11";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -294,7 +294,7 @@ int main(int argc, char *argv[]) {
 			if (unsat_cubes == wus_num-1 and sat_cubes == 0 and interr_cubes == 0) {
 				is_add_sat_clause = true;
 				// Interrupt processing of the last cube: 
-				cout << "Interrupt the only unprocessed cube by killing CDCL solver " << cdcl_solver_name << endl;
+				cout << "Trying to interrupt the only unprocessed cube by killing CDCL solver " << cdcl_solver_name << endl;
 				kill_solver(cdcl_solver_name);
 			}
 		}
@@ -303,6 +303,10 @@ int main(int argc, char *argv[]) {
 		// Remove temporary files:
 		system_str = "rm -f id-*";
 		exec(system_str);
+
+		if (is_add_sat_clause == true and interr_cubes == 0) {
+			cout << "No interruption is needed since all cubes are solved" << endl;
+		}
 
 		cout << "Result : ";
 		// If at least one cube-problem is SAT, return SAT:
@@ -659,7 +663,7 @@ void print_stats(const workunit wu, const unsigned sat_cubes,
 }
 
 void kill_solver(const string solver_name) {
-	string system_str = "killall -9 " + solver_name;
+	string system_str = "pkill " + solver_name;
 	exec(system_str);
 }
 
