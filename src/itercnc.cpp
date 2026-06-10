@@ -20,13 +20,14 @@
 // Usage : itercnc la-solver cdcl-solver cnf nthreads [conflict-limit-cube] 
 //
 // Example 1:
-//     ./itercnc ./march ./kissat ./problem.cnf 16 100000 
-//   iteratively produces at most 16 cubes on problem.cnf and runs kissat on
-//   them with the limit of 100000 conflicts.
-// Example 2:
 //     ./itercnc ./march ./kissat ./problem.cnf 16 
 //   iteratively produces at most 16 cubes on problem.cnf and runs kissat on
 //   them without any limit.
+//
+// Example 2:
+//     ./itercnc ./march ./kissat ./problem.cnf 16 -confllim=100000 
+//   iteratively produces at most 16 cubes on problem.cnf and runs kissat on
+//   them with the limit of 100000 conflicts.
 //=============================================================================
 
 #include <iostream>
@@ -44,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.1.11";
+string version = "0.2.0";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -105,7 +106,8 @@ unsigned get_cutoff(const string la_solver_name,
 	                const cnf cur_cnf,
 					const unsigned prev_threshold,
 	                const unsigned nthreads,
-					set<string> interr_cubes_set);
+					set<string> interr_cubes_set,
+					const bool is_dict_skipping);
 unsigned get_free_vars(const string la_solver_name, const cnf cur_cnf);
 string exec(const string cmd_str);
 vector<workunit> read_cubes(const string cubes_name);
@@ -123,13 +125,17 @@ cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 						  const bool is_add_sat_clause=false);
 
 void print_usage() {
-	cout << "Usage : itercnc la-solver cdcl-solver cnf nthreads"
-	     << "[conflict-limit-cube] [-n=<unsigned>]" << endl;
-	cout << "  If conflict-limit-cube is not given, then CDCL solver is "; 
-	cout << "unlimited";
-	cout << "  -n sets a constant threshold that is used every iteration." << endl;
+	cout << "Usage : itercnc la-solver cdcl-solver cnf nthreads "
+	     << "[-confllim=<unsigned>] [-n=<unsigned>] [--dict]" << endl;
+	cout << "  -confllim sets the limit on the number of conflicts in the " 
+	     << "CDCL solver; if not set, the the solver is unlimited each run."; 
+	cout << "unlimited" << endl;
+	cout << "  -n sets a constant threshold that is used every iteration."
+	     << endl;
 	cout << "  Without a given constant threshold, a suitable threshold is"
 		 << "found every iteration." << endl;
+	cout << "  --dict enables skipping cubes which have already been "
+	     << "interrupted" << endl;
 }
 
 void print_version() {
@@ -173,13 +179,19 @@ int main(int argc, char *argv[]) {
 	string cnf_name = str_argv[3];
 	unsigned nthreads = stoi(str_argv[4]);
 	unsigned cube_conflict_lim = 0;
-	if (argc >= 6) {
-		cube_conflict_lim = stoi(str_argv[5]);
-	}
 	unsigned constant_threshold = 0;
-	if (argc >= 7) {
-		string str = str_argv[6];
-		if (str.rfind("-n=", 0) == 0) constant_threshold = stoi(str.substr(3, str.size()-3));
+	bool is_dict_skipping = false;
+	for (int i=5; i < argc; i++) {
+		string str = str_argv[i];
+		if (str.rfind("-confllim=", 0) == 0) {
+			cube_conflict_lim = stoi(str.substr(10, str.size()-10));
+		}
+		else if (str.rfind("-n=", 0) == 0) {
+			constant_threshold = stoi(str.substr(3, str.size()-3));
+		}
+		else if (str == "--dict") {
+			is_dict_skipping = true;
+		}
 	}
 
 	const unsigned system_nthreads = thread::hardware_concurrency();
@@ -193,8 +205,8 @@ int main(int argc, char *argv[]) {
 	cout << "number of threads : "   << nthreads           << endl;
 	cout << "cube_conflict_limit : " << cube_conflict_lim  << endl;
 	cout << "constant threshold : "  << constant_threshold << endl;
+	cout << "is_dict_skipping : "    << is_dict_skipping   << endl;
 
-	cout << endl;
 	cout << "Reading CNF " << cnf_name << endl;
 	cnf cur_cnf(cnf_name);
 	cur_cnf.print();
@@ -221,7 +233,7 @@ int main(int argc, char *argv[]) {
 		// Otherwise, find a proper cutoff threshold for cubing:
 		else {
 			cout << "prev_threshold : " << prev_threshold << endl;
-			threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads, interr_cubes_set);
+			threshold = get_cutoff(la_solver_name, cur_cnf, prev_threshold, nthreads, interr_cubes_set, is_dict_skipping);
 			prev_threshold = threshold;
 		}
 		// Produce cubes:
@@ -233,8 +245,15 @@ int main(int argc, char *argv[]) {
 		exec(system_str);
 		vector<workunit> nontried_wu_vec;
 		for (auto &wu : wu_vec) {
-			string cube_str = cube_to_str(wu.cube);
-			if (interr_cubes_set.find(cube_str) == interr_cubes_set.end()) {
+			// If this heuristic is enabled, skip all previously interrupted cubes:
+			if (is_dict_skipping) {
+				string cube_str = cube_to_str(wu.cube);
+				if (interr_cubes_set.find(cube_str) == interr_cubes_set.end()) {
+					nontried_wu_vec.push_back(wu);
+				}
+			}
+			else {
+				// Otherwise, process all cubes:
 				nontried_wu_vec.push_back(wu);
 			}
 		}
@@ -283,7 +302,9 @@ int main(int argc, char *argv[]) {
 				// If a cube not in the set, add it:
 				// cout << cube_str << endl;
 				// An already processed cube must be excluded from the current list:
-				assert(interr_cubes_set.find(cube_str) == interr_cubes_set.end());
+				if (is_dict_skipping) {
+					assert(interr_cubes_set.find(cube_str) == interr_cubes_set.end());
+				}
 				interr_cubes_set.insert(cube_str);
 				//else {
 				//	cout << "Already interrupted cube : " << cube_str << endl;
@@ -393,7 +414,8 @@ unsigned get_cutoff(const string la_solver_name,
 					const cnf cur_cnf,
 	                const unsigned prev_threshold,
 					const unsigned nthreads,
-					set<string> interr_cubes_set) {
+					set<string> interr_cubes_set,
+					const bool is_dict_skipping) {
 	assert(cur_cnf.name != "");
 	assert(cur_cnf.var_num > 0);
 	const string cnf_name = cur_cnf.name;
@@ -421,8 +443,15 @@ unsigned get_cutoff(const string la_solver_name,
 		unsigned all_cubes_num = wu_vec.size();
 		vector<workunit> nontried_wu_vec;
 		for (auto &wu : wu_vec) {
-			string cube_str = cube_to_str(wu.cube);
-			if (interr_cubes_set.find(cube_str) == interr_cubes_set.end()) {
+			// If this heuristic is enabled, skip all previously interrupted cubes:
+			if (is_dict_skipping) {
+				string cube_str = cube_to_str(wu.cube);
+				if (interr_cubes_set.find(cube_str) == interr_cubes_set.end()) {
+					nontried_wu_vec.push_back(wu);
+				}
+			}
+			else {
+				// Otherwise, process all cubes:
 				nontried_wu_vec.push_back(wu);
 			}
 		}
