@@ -44,7 +44,7 @@
 
 using namespace std;
 
-string version = "0.1.9";
+string version = "0.1.10";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -229,7 +229,7 @@ int main(int argc, char *argv[]) {
 		string system_str = la_solver_name + " " + cur_cnf.name + " -n " + to_string(threshold) + " -o " + cubes_name;
 		exec(system_str);
 		vector<workunit> wu_vec = read_cubes(cubes_name);
-		system_str = "rm " + cubes_name;
+		system_str = "rm -f " + cubes_name;
 		exec(system_str);
 		vector<workunit> nontried_wu_vec;
 		for (auto &wu : wu_vec) {
@@ -301,7 +301,7 @@ int main(int argc, char *argv[]) {
 		cout << "skipped-cubes : " << skipped_cubes << endl;
 
 		// Remove temporary files:
-		system_str = "rm id-*";
+		system_str = "rm -f id-*";
 		exec(system_str);
 
 		cout << "Result : ";
@@ -318,6 +318,15 @@ int main(int argc, char *argv[]) {
 			assert(sat_cubes == 0);
 			assert(interr_cubes == 0);
 			cout << "UNSAT" << endl;
+			// Save information about UNSATISFIABILITY to a file:
+			const time_point_t program_end = chrono::system_clock::now();
+			const double elapsed = chrono::duration_cast<chrono::seconds>(program_end - program_start).count();
+			string fname = "!unsat_" + base_cnf_name;
+			ofstream ofile(fname, ios_base::out);
+			ofile << "UNSAT" << endl;
+			ofile << "elapsed wall time since program start : " << elapsed << " seconds" << endl;
+			ofile << "All " << wus_num << " cubes are unsatisfiable" << endl;
+			ofile.close();
 			break;
 		}
 		// If all (previously non-interrupted) cube-problems are interrupted, return INTERRUPTED
@@ -612,7 +621,7 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	}
 
 	// Remove a file with the current CNF and a file with the solver result:
-	system_str = "rm id-" + wu_id_str + "-*";
+	system_str = "rm -f id-" + wu_id_str + "-*";
 	exec(system_str);
 	return res;
 }
