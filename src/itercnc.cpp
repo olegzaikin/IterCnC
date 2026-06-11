@@ -45,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.2.0";
+string version = "0.2.1";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -114,19 +114,22 @@ vector<workunit> read_cubes(const string cubes_name);
 bool is_empty_file(const string fname);
 result solve_cube(const string base_cnf_name, const cnf c,
 				  const string solver_name, const time_point_t program_start,
-				  workunit &wu, const unsigned cube_time_lim);
+				  workunit &wu, const unsigned cube_conflict_lim,
+				  const double cpu_lim);
 result read_solver_result(const string fname);
 void print_stats(const workunit wu, const unsigned sat_cubes,
 	             const unsigned unsat_cubes, const unsigned interr_cubes);
 void kill_solver(const string solver_name);
-void print_elapsed_time(const time_point_t program_start);
+double elapsed_seconds(const time_point_t program_start);
+void print_elapsed_seconds(const time_point_t program_start);
 cnf add_sat_unsat_clauses(cnf cur_cnf, vector<workunit> wu_vec,
 	                      const unsigned iter_num,
 						  const bool is_add_sat_clause=false);
 
 void print_usage() {
 	cout << "Usage : itercnc la-solver cdcl-solver cnf nthreads "
-	     << "[-confllim=<unsigned>] [-n=<unsigned>] [--dict]" << endl;
+	     << "[-confllim=<unsigned>] [-n=<unsigned>] [-cpulim=<double>] "
+		 << "[--dict]" << endl;
 	cout << "  -confllim sets the limit on the number of conflicts in the " 
 	     << "CDCL solver; if not set, the the solver is unlimited each run."; 
 	cout << "unlimited" << endl;
@@ -134,6 +137,8 @@ void print_usage() {
 	     << endl;
 	cout << "  Without a given constant threshold, a suitable threshold is"
 		 << "found every iteration." << endl;
+	cout << "  -cpulim sets a wall time limit in seconds "
+	     << "(unlimited by default)." << endl;
 	cout << "  --dict enables skipping cubes which have already been "
 	     << "interrupted" << endl;
 }
@@ -180,6 +185,7 @@ int main(int argc, char *argv[]) {
 	unsigned nthreads = stoi(str_argv[4]);
 	unsigned cube_conflict_lim = 0;
 	unsigned constant_threshold = 0;
+	double cpu_lim = 0;
 	bool is_dict_skipping = false;
 	for (int i=5; i < argc; i++) {
 		string str = str_argv[i];
@@ -188,6 +194,10 @@ int main(int argc, char *argv[]) {
 		}
 		else if (str.rfind("-n=", 0) == 0) {
 			constant_threshold = stoi(str.substr(3, str.size()-3));
+		}
+		else if (str.rfind("-cpulim=", 0) == 0) {
+			cpu_lim = stod(str.substr(8, str.size()-8));
+			assert(cpu_lim >= 0);
 		}
 		else if (str == "--dict") {
 			is_dict_skipping = true;
@@ -199,13 +209,14 @@ int main(int argc, char *argv[]) {
 		cout << "Warning : " << system_nthreads << " threads in total, but "
 		     << nthreads << " threads are requested." << endl;
 	}
-	cout << "lookahead solver : "    << la_solver_name     << endl;
-	cout << "CDCL solver : "         << cdcl_solver_name   << endl;
-	cout << "cnf : "                 << cnf_name           << endl;
-	cout << "number of threads : "   << nthreads           << endl;
+	cout << "lookahead solver    : " << la_solver_name     << endl;
+	cout << "CDCL solver         : " << cdcl_solver_name   << endl;
+	cout << "cnf                 : " << cnf_name           << endl;
+	cout << "number of threads   : " << nthreads           << endl;
 	cout << "cube_conflict_limit : " << cube_conflict_lim  << endl;
-	cout << "constant threshold : "  << constant_threshold << endl;
-	cout << "is_dict_skipping : "    << is_dict_skipping   << endl;
+	cout << "constant threshold  : " << constant_threshold << endl;
+	cout << "cpu lim in seconds  : " << cpu_lim            << endl;
+	cout << "is_dict_skipping    : " << is_dict_skipping   << endl;
 
 	cout << "Reading CNF " << cnf_name << endl;
 	cnf cur_cnf(cnf_name);
@@ -280,8 +291,13 @@ int main(int argc, char *argv[]) {
 				skipped_cubes++;
 				continue;
 			}
+			double elapsed_sec = elapsed_seconds(program_start);
+			// Skip a cube if a wall clock time limit is reached:
+			if (cpu_lim > 0 and elapsed_sec > cpu_lim) {
+				continue;
+			}
 			result res = solve_cube(base_cnf_name, cur_cnf, cdcl_solver_name,
-				program_start, wu, cube_conflict_lim);
+				program_start, wu, cube_conflict_lim, cpu_lim);
 			if (res == SAT) {
 				sat_cubes++;
 				cout << "SAT is found." << endl;
@@ -329,6 +345,8 @@ int main(int argc, char *argv[]) {
 			cout << "No interruption is needed since all cubes are solved" << endl;
 		}
 
+		double elapsed_sec = elapsed_seconds(program_start);
+
 		cout << "Result : ";
 		// If at least one cube-problem is SAT, return SAT:
 		if (sat_cubes) {
@@ -344,12 +362,10 @@ int main(int argc, char *argv[]) {
 			assert(interr_cubes == 0);
 			cout << "UNSAT" << endl;
 			// Save information about UNSATISFIABILITY to a file:
-			const time_point_t program_end = chrono::system_clock::now();
-			const double elapsed = chrono::duration_cast<chrono::seconds>(program_end - program_start).count();
 			string fname = "!unsat_" + base_cnf_name;
 			ofstream ofile(fname, ios_base::out);
 			ofile << "UNSAT" << endl;
-			ofile << "elapsed wall time since program start : " << elapsed << " seconds" << endl;
+			ofile << "elapsed wall time since program start : " << elapsed_sec << " seconds" << endl;
 			ofile << "All " << wus_num << " cubes are unsatisfiable" << endl;
 			ofile.close();
 			break;
@@ -360,6 +376,10 @@ int main(int argc, char *argv[]) {
 			assert(sat_cubes == 0);
 			assert(unsat_cubes == 0);
 			cout << "INTERRUPTED" << endl;
+			break;
+		}
+		else if (cpu_lim > 0 and elapsed_sec >= cpu_lim) {
+			cout << "TIMEOUT" << endl;
 			break;
 		}
 		// If at least one cube-problem is UNSAT and at least one cube-problem
@@ -388,7 +408,7 @@ int main(int argc, char *argv[]) {
 			cur_cnf = new_cnf;
 		}
 		iter_num++;
-		print_elapsed_time(program_start);
+		print_elapsed_seconds(program_start);
 		cout << endl;
 	}
 
@@ -403,7 +423,7 @@ int main(int argc, char *argv[]) {
 		ofile << " 0" << endl;
 	}
 	ofile.close();
-	print_elapsed_time(program_start);
+	print_elapsed_seconds(program_start);
 
     return 0;
 }
@@ -596,7 +616,8 @@ bool is_empty_file(const string fname) {
 
 result solve_cube(const string base_cnf_name, const cnf c,
 				  const string solver_name, const time_point_t program_start,
-				  workunit &wu, const unsigned cube_conflict_lim)
+				  workunit &wu, const unsigned cube_conflict_lim,
+				  const double cpu_lim)
 {
 	string wu_id_str = to_string(wu.id);
 	string local_cnf_file_name = "id-" + wu_id_str + "-cnf";
@@ -612,6 +633,14 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	if (cube_conflict_lim > 0) {
 		system_str += " --conflicts=" + to_string(cube_conflict_lim);
 	}
+	if (cpu_lim > 0) {
+		double elapsed_sec = elapsed_seconds(program_start);
+		double remaining_sec = cpu_lim - elapsed_sec;
+		assert(remaining_sec >= 0);
+		// + 1 in case of rounding to 0:
+		unsigned remaining_sec_uint = (unsigned)remaining_sec + 1;
+		system_str += " --time=" + to_string(remaining_sec_uint);
+	}
 	system_str += " " + local_cnf_file_name;
 	//cout << system_str << endl;
 	string local_out_file_name = "id-" + wu_id_str + "-out";
@@ -621,6 +650,7 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	const time_point_t solver_start = chrono::system_clock::now();
 	string res_str = exec(system_str);
 	const time_point_t solver_end = chrono::system_clock::now();
+	// Convert milliseconds in integer to seconds in double:
 	const double solver_time = chrono::duration_cast<chrono::milliseconds>(solver_end - solver_start).count() / (double)1000;
 	wu.time = solver_time;
 
@@ -696,11 +726,15 @@ void kill_solver(const string solver_name) {
 	exec(system_str);
 }
 
-void print_elapsed_time(const time_point_t program_start) {
+double elapsed_seconds(const time_point_t program_start) {
 	const time_point_t program_end = chrono::system_clock::now();
-	cout << "Elapsed : "
-	<< chrono::duration_cast<chrono::seconds>(program_end - program_start).count()
-	<< " seconds" << endl;
+	double res = chrono::duration_cast<chrono::milliseconds>(program_end - program_start).count() / (double)1000;
+	return res;
+}
+
+void print_elapsed_seconds(const time_point_t program_start) {
+	cout << "Elapsed : " << elapsed_seconds(program_start) << " seconds"
+		 << endl;
 }
 
 // Add a negation-clause for each UNSAT cube and a unit clause for each
