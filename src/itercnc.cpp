@@ -45,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.2.1";
+string version = "0.2.2";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -722,7 +722,11 @@ void print_stats(const workunit wu, const unsigned sat_cubes,
 }
 
 void kill_solver(const string solver_name) {
-	string system_str = "pkill " + solver_name;
+	string mod_solver_name = solver_name;
+    if (mod_solver_name.rfind("./", 0) == 0) { 
+        mod_solver_name.erase(0, 2);
+    }
+	string system_str = "pkill " + mod_solver_name;
 	exec(system_str);
 }
 
