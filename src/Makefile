@@ -1,5 +1,5 @@
 CPP = g++
-CPPFLAGS = -O3 -std=c++20 -fopenmp
+CPPFLAGS = -O3 -std=c++23 -fopenmp
 
 itercnc: itercnc.o
 	${CPP} ${CPPFLAGS} itercnc.o -o itercnc

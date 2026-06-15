@@ -45,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.2.2";
+string version = "0.2.3";
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -631,7 +631,13 @@ result solve_cube(const string base_cnf_name, const cnf c,
 
 	string system_str = solver_name;
 	if (cube_conflict_lim > 0) {
-		system_str += " --conflicts=" + to_string(cube_conflict_lim);
+		// Kissat and other solvers:
+		string key_str = "--conflicts=";
+		// Cadical:
+		if (solver_name.contains("cadical")) {
+			key_str = "-c ";
+		}
+		system_str += " " + key_str + to_string(cube_conflict_lim);
 	}
 	if (cpu_lim > 0) {
 		double elapsed_sec = elapsed_seconds(program_start);
@@ -639,7 +645,13 @@ result solve_cube(const string base_cnf_name, const cnf c,
 		assert(remaining_sec >= 0);
 		// + 1 in case of rounding to 0:
 		unsigned remaining_sec_uint = (unsigned)remaining_sec + 1;
-		system_str += " --time=" + to_string(remaining_sec_uint);
+		// Kissat and other solvers:
+		string key_str = "--time=";
+		// Cadical:
+		if (solver_name.contains("cadical")) {
+			key_str = "-t ";
+		}
+		system_str += " " + key_str + to_string(remaining_sec_uint);
 	}
 	system_str += " " + local_cnf_file_name;
 	//cout << system_str << endl;
