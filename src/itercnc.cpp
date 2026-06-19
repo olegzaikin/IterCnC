@@ -45,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.2.4";
+string version = "0.2.5";
 
 // If at least 1 cube is solved within the warmup, interrupt the iteration.
 const double WARMUP_TIME_SEC = 60;
@@ -118,7 +118,7 @@ bool is_empty_file(const string fname);
 result solve_cube(const string base_cnf_name, const cnf c,
 				  const string solver_name, const time_point_t program_start,
 				  workunit &wu, const unsigned cube_conflict_lim,
-				  const double cpu_lim);
+				  const double cpu_lim, const unsigned iter_num);
 result read_solver_result(const string fname);
 void print_stats(const workunit wu, const unsigned sat_cubes,
 	             const unsigned unsat_cubes, const unsigned interr_cubes);
@@ -300,7 +300,7 @@ int main(int argc, char *argv[]) {
 				continue;
 			}
 			result res = solve_cube(base_cnf_name, cur_cnf, cdcl_solver_name,
-				program_start, wu, cube_conflict_lim, cpu_lim);
+				program_start, wu, cube_conflict_lim, cpu_lim, iter_num);
 			if (res == SAT) {
 				sat_cubes++;
 				cout << "SAT is found." << endl;
@@ -641,7 +641,7 @@ bool is_empty_file(const string fname) {
 result solve_cube(const string base_cnf_name, const cnf c,
 				  const string solver_name, const time_point_t program_start,
 				  workunit &wu, const unsigned cube_conflict_lim,
-				  const double cpu_lim)
+				  const double cpu_lim, const unsigned iter_num)
 {
 	string wu_id_str = to_string(wu.id);
 	string local_cnf_file_name = "id-" + wu_id_str + "-cnf";
@@ -653,7 +653,9 @@ result solve_cube(const string base_cnf_name, const cnf c,
 	for (auto x : wu.cube) local_cnf_file << x << " 0" << endl;
 	local_cnf_file.close();
 
-	string system_str = solver_name;
+	string system_str = solver_name; 
+	// Be sure that each iteration has its own seed for CDCL:
+	system_str += " --seed=" + to_string(iter_num);
 	if (cube_conflict_lim > 0) {
 		// Kissat and other solvers:
 		string key_str = "--conflicts=";
