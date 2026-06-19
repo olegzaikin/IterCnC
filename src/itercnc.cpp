@@ -45,7 +45,10 @@
 
 using namespace std;
 
-string version = "0.2.3";
+string version = "0.2.4";
+
+// If at least 1 cube is solved within the warmup, interrupt the iteration.
+const double WARMUP_TIME_SEC = 60;
 
 #define cube_t vector<int> 
 #define time_point_t chrono::time_point<chrono::system_clock>
@@ -327,12 +330,33 @@ int main(int argc, char *argv[]) {
 				//}
 				print_stats(wu, sat_cubes, unsat_cubes, interr_cubes);
 			}
+			//
 			// If all but one solved and UNSAT, interrupt the remaining one:
 			if (unsat_cubes == wus_num-1 and sat_cubes == 0 and interr_cubes == 0) {
 				is_add_sat_clause = true;
 				// Interrupt processing of the last cube: 
 				cout << "Trying to interrupt the only unprocessed cube by killing CDCL solver " << cdcl_solver_name << endl;
 				kill_solver(cdcl_solver_name);
+			}
+			// If the first cube is solved in the WARMUP mode,
+			else if (unsat_cubes==1 and wu.time <= WARMUP_TIME_SEC) {
+				// Wait for one second for very fast other cubes:
+				string system_str = "sleep 1";
+				//cout << "system_str : " << system_str << endl;
+				exec(system_str);
+				// Do it only if there is something to interrupt:
+				if (sat_cubes == 0 and unsat_cubes < wus_num-1) {
+					double elapsed_warmup_time = WARMUP_TIME_SEC - wu.time;
+					assert(elapsed_warmup_time >= 0 and elapsed_warmup_time <= WARMUP_TIME_SEC);
+					// wait until the end of this mode,
+					system_str = "sleep " + to_string(elapsed_warmup_time);
+					//cout << "system_str : " << system_str << endl;
+					exec(system_str);
+					// and then interrupt the iteration:
+					cout << "Trying to interrupt the iteration due to solved cubes in the warmup mode." << endl;
+					cout << "elapsed_warmup_time : " << elapsed_warmup_time << endl;
+					kill_solver(cdcl_solver_name);
+				}
 			}
 		}
 		cout << "skipped-cubes : " << skipped_cubes << endl;
@@ -734,11 +758,13 @@ void print_stats(const workunit wu, const unsigned sat_cubes,
 }
 
 void kill_solver(const string solver_name) {
+	string system_str = "pkill -f sleep";
+	exec(system_str);
 	string mod_solver_name = solver_name;
     if (mod_solver_name.rfind("./", 0) == 0) { 
         mod_solver_name.erase(0, 2);
     }
-	string system_str = "pkill " + mod_solver_name;
+	system_str = "pkill " + mod_solver_name;
 	exec(system_str);
 }
 
