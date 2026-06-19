@@ -45,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.2.6";
+string version = "0.2.7";
 
 // If at least 1 cube is solved within the warmup, interrupt the iteration.
 const double WARMUP_TIME_SEC = 60;
@@ -221,7 +221,7 @@ int main(int argc, char *argv[]) {
 	cout << "cpu lim in seconds  : " << cpu_lim            << endl;
 	cout << "is dict skipping    : " << is_dict_skipping   << endl;
 
-	if (constant_threshold > 0) {
+	if (cube_conflict_lim > 0) {
 		cout << "Warmup mode is disabled since a non-zero constant threshold is given" << endl;
 	}
 	else {
@@ -347,7 +347,7 @@ int main(int argc, char *argv[]) {
 				kill_solver(cdcl_solver_name);
 			}
 			// If the first cube is solved in the WARMUP mode,
-			else if (unsat_cubes==1 and wu.time <= WARMUP_TIME_SEC and constant_threshold == 0) {
+			else if (unsat_cubes==1 and wu.time <= WARMUP_TIME_SEC and cube_conflict_lim == 0) {
 				// Wait for one second for very fast other cubes:
 				string system_str = "sleep 1";
 				//cout << "system_str : " << system_str << endl;
