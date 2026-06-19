@@ -17,7 +17,7 @@
 //     limit, add negation-clauses for the UNSAT-cubes to the CNF and go to 1;
 //  e) no cubes are solved within the conflict limit - stop and return INDET.
 //
-// Usage : itercnc la-solver cdcl-solver cnf nthreads [conflict-limit-cube] 
+// Usage : itercnc la-solver cdcl-solver cnf nthreads
 //
 // Example 1:
 //     ./itercnc ./march ./kissat ./problem.cnf 16 
@@ -45,7 +45,7 @@
 
 using namespace std;
 
-string version = "0.2.5";
+string version = "0.2.6";
 
 // If at least 1 cube is solved within the warmup, interrupt the iteration.
 const double WARMUP_TIME_SEC = 60;
@@ -219,7 +219,15 @@ int main(int argc, char *argv[]) {
 	cout << "cube_conflict_limit : " << cube_conflict_lim  << endl;
 	cout << "constant threshold  : " << constant_threshold << endl;
 	cout << "cpu lim in seconds  : " << cpu_lim            << endl;
-	cout << "is_dict_skipping    : " << is_dict_skipping   << endl;
+	cout << "is dict skipping    : " << is_dict_skipping   << endl;
+
+	if (constant_threshold > 0) {
+		cout << "Warmup mode is disabled since a non-zero constant threshold is given" << endl;
+	}
+	else {
+		cout << "Warmup mode with " << WARMUP_TIME_SEC
+			 << " seconds is enabled since a zero constant threshold is given" << endl;
+	}
 
 	cout << "Reading CNF " << cnf_name << endl;
 	cnf cur_cnf(cnf_name);
@@ -339,7 +347,7 @@ int main(int argc, char *argv[]) {
 				kill_solver(cdcl_solver_name);
 			}
 			// If the first cube is solved in the WARMUP mode,
-			else if (unsat_cubes==1 and wu.time <= WARMUP_TIME_SEC) {
+			else if (unsat_cubes==1 and wu.time <= WARMUP_TIME_SEC and constant_threshold == 0) {
 				// Wait for one second for very fast other cubes:
 				string system_str = "sleep 1";
 				//cout << "system_str : " << system_str << endl;
